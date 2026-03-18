@@ -28,6 +28,44 @@ const TIPS = [
   { icon: "🧹", text: "Use the eraser for small corrections" },
 ];
 
+// Declare katex on window for TypeScript
+declare global {
+  interface Window {
+    katex: {
+      render: (
+        latex: string,
+        element: HTMLElement,
+        options?: { throwOnError?: boolean; displayMode?: boolean },
+      ) => void;
+    };
+  }
+}
+
+function KaTeXSpan({ latex }: { latex: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (window.katex) {
+      try {
+        window.katex.render(latex, el, {
+          throwOnError: false,
+          displayMode: false,
+        });
+      } catch {
+        el.textContent = latex;
+      }
+    } else {
+      el.textContent = latex;
+    }
+  }, [latex]);
+
+  return (
+    <span ref={ref} className="ms-result-chip-val ms-result-chip-val--katex" />
+  );
+}
+
 export default function CanvasArea() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const snapshotsRef = useRef<ImageData[]>([]);
@@ -46,6 +84,7 @@ export default function CanvasArea() {
   const [errorMsg, setErrorMsg] = useState("");
   const [hasDrawn, setHasDrawn] = useState(false);
   const [tipsOpen, setTipsOpen] = useState(false);
+  const [katexLoaded, setKatexLoaded] = useState(false);
 
   const bounds = useRef({
     minX: Infinity,
@@ -53,6 +92,27 @@ export default function CanvasArea() {
     maxX: -Infinity,
     maxY: -Infinity,
   });
+
+  // Load KaTeX dynamically
+  useEffect(() => {
+    if (window.katex) {
+      setKatexLoaded(true);
+      return;
+    }
+    // Load KaTeX CSS
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href =
+      "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css";
+    document.head.appendChild(link);
+
+    // Load KaTeX JS
+    const script = document.createElement("script");
+    script.src =
+      "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js";
+    script.onload = () => setKatexLoaded(true);
+    document.head.appendChild(script);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -239,7 +299,6 @@ export default function CanvasArea() {
             </svg>
             Tips
           </button>
-          <div className="ms-header-badge">AI Powered</div>
         </div>
       </header>
 
@@ -442,25 +501,37 @@ export default function CanvasArea() {
           {/* Result */}
           {status === "success" && prediction && (
             <div className="ms-result">
+              
               <div className="ms-result-chip ms-result-chip--blue">
                 <span className="ms-result-chip-label">Expression</span>
-                <span className="ms-result-chip-val">{prediction.latex}</span>
+                {katexLoaded ? (
+                  <KaTeXSpan key={prediction.latex} latex={prediction.latex} />
+                ) : (
+                  <span className="ms-result-chip-val">{prediction.latex}</span>
+                )}
               </div>
-              {prediction.is_equation && prediction.result && (
+
+              
+              {prediction.result !== null && (
                 <>
                   <span className="ms-result-eq-sign">=</span>
                   <div className="ms-result-chip ms-result-chip--gold">
-                    <span className="ms-result-chip-label">Result</span>
+                    
+                    <span className="ms-result-chip-label">
+                      {prediction.is_equation ? "Solution" : "Result"}
+                    </span>
                     <span className="ms-result-chip-val">
                       {prediction.result}
                     </span>
                   </div>
                 </>
               )}
-              {prediction.is_equation && !prediction.result && (
+
+              {prediction.is_equation && prediction.result === null && (
                 <span className="ms-result-unsolvable">Could not solve</span>
               )}
-              {!prediction.is_equation && (
+
+              {!prediction.is_equation && prediction.result === null && (
                 <span className="ms-result-tag">
                   Expression &#xB7; not an equation
                 </span>
@@ -488,7 +559,7 @@ export default function CanvasArea() {
         </div>
       </div>
 
-      {/* Mobile backdrop */}
+      
       {tipsOpen && (
         <div className="ms-tips-backdrop" onClick={() => setTipsOpen(false)} />
       )}
@@ -650,6 +721,9 @@ export default function CanvasArea() {
         .ms-result-chip--gold { background: #fffbeb; border: 1.5px solid #fcd34d; }
         .ms-result-chip-label { font-size: 8px; text-transform: uppercase; letter-spacing: 0.16em; color: #9b9480; }
         .ms-result-chip-val { font-family: 'Lora', serif; font-size: 22px; color: #1a1a2e; line-height: 1.2; word-break: break-all; }
+        /* KaTeX rendered span — let KaTeX control font, just set size/color */
+        .ms-result-chip-val--katex { font-size: 20px; color: #1a1a2e; line-height: 1.4; }
+        .ms-result-chip-val--katex .katex { font-size: 1em; }
         .ms-result-chip--gold .ms-result-chip-val { color: #92400e; }
         .ms-result-eq-sign { font-family: 'Lora', serif; font-size: 26px; color: #c8c3b8; }
         .ms-result-tag { font-size: 10px; color: #9b9480; letter-spacing: 0.06em; }
