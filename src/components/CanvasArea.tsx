@@ -41,7 +41,36 @@ declare global {
   }
 }
 
-function KaTeXSpan({ latex }: { latex: string }) {
+// Convert backend expression strings to valid LaTeX
+function toLatex(raw: string): string {
+  if (!raw) return raw;
+  return raw
+    .replace(/\*\*/g, "^") // x**3 → x^3
+    .replace(/\*/g, " \\cdot ") // x*y  → x \cdot y
+    .replace(/sqrt\(([^)]+)\)/g, "\\sqrt{$1}") // sqrt(x) → \sqrt{x}
+    .replace(/\bpi\b/g, "\\pi") // pi → \pi
+    .replace(/\b(sin|cos|tan|cot|sec|csc)\(([^)]+)\)/g, "\\$1($2)") // trig
+    .replace(/\blog\(([^)]+)\)/g, "\\log($1)") // log(x)
+    .replace(/\bln\(([^)]+)\)/g, "\\ln($1)") // ln(x)
+    .replace(/\bexp\(([^)]+)\)/g, "\\exp($1)") // exp(x)
+    .replace(/\binfty\b/g, "\\infty") // infty → \infty
+    .replace(/\btheta\b/g, "\\theta") // theta → \theta
+    .replace(/\balpha\b/g, "\\alpha") // alpha → \alpha
+    .replace(/\bbeta\b/g, "\\beta") // beta → \beta
+    .replace(/\bgamma\b/g, "\\gamma") // gamma → \gamma
+    .replace(/\bdelta\b/g, "\\delta") // delta → \delta
+    .replace(/\blambda\b/g, "\\lambda") // lambda → \lambda
+    .replace(/\bmu\b/g, "\\mu") // mu → \mu
+    .replace(/\bsigma\b/g, "\\sigma"); // sigma → \sigma
+}
+
+function KaTeXSpan({
+  latex,
+  className,
+}: {
+  latex: string;
+  className?: string;
+}) {
   const ref = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
@@ -62,7 +91,10 @@ function KaTeXSpan({ latex }: { latex: string }) {
   }, [latex]);
 
   return (
-    <span ref={ref} className="ms-result-chip-val ms-result-chip-val--katex" />
+    <span
+      ref={ref}
+      className={`ms-result-chip-val ms-result-chip-val--katex ${className ?? ""}`}
+    />
   );
 }
 
@@ -99,14 +131,12 @@ export default function CanvasArea() {
       setKatexLoaded(true);
       return;
     }
-    // Load KaTeX CSS
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href =
       "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css";
     document.head.appendChild(link);
 
-    // Load KaTeX JS
     const script = document.createElement("script");
     script.src =
       "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js";
@@ -501,28 +531,40 @@ export default function CanvasArea() {
           {/* Result */}
           {status === "success" && prediction && (
             <div className="ms-result">
-              
+              {/* Expression chip */}
               <div className="ms-result-chip ms-result-chip--blue">
                 <span className="ms-result-chip-label">Expression</span>
                 {katexLoaded ? (
-                  <KaTeXSpan key={prediction.latex} latex={prediction.latex} />
+                  <KaTeXSpan
+                    key={prediction.latex}
+                    latex={toLatex(prediction.latex)}
+                  />
                 ) : (
-                  <span className="ms-result-chip-val">{prediction.latex}</span>
+                  <span className="ms-result-chip-val">
+                    {toLatex(prediction.latex)}
+                  </span>
                 )}
               </div>
 
-              
+              {/* Result chip */}
               {prediction.result !== null && (
                 <>
                   <span className="ms-result-eq-sign">=</span>
                   <div className="ms-result-chip ms-result-chip--gold">
-                    
                     <span className="ms-result-chip-label">
                       {prediction.is_equation ? "Solution" : "Result"}
                     </span>
-                    <span className="ms-result-chip-val">
-                      {prediction.result}
-                    </span>
+                    {katexLoaded ? (
+                      <KaTeXSpan
+                        key={prediction.result}
+                        latex={toLatex(prediction.result)}
+                        className="ms-result-chip-val--gold"
+                      />
+                    ) : (
+                      <span className="ms-result-chip-val ms-result-chip-val--plain-gold">
+                        {toLatex(prediction.result)}
+                      </span>
+                    )}
                   </div>
                 </>
               )}
@@ -559,7 +601,6 @@ export default function CanvasArea() {
         </div>
       </div>
 
-      
       {tipsOpen && (
         <div className="ms-tips-backdrop" onClick={() => setTipsOpen(false)} />
       )}
@@ -724,6 +765,11 @@ export default function CanvasArea() {
         /* KaTeX rendered span — let KaTeX control font, just set size/color */
         .ms-result-chip-val--katex { font-size: 20px; color: #1a1a2e; line-height: 1.4; }
         .ms-result-chip-val--katex .katex { font-size: 1em; }
+        /* Gold variant for result chip KaTeX */
+        .ms-result-chip-val--gold { color: #92400e !important; }
+        .ms-result-chip-val--gold .katex { color: #92400e; }
+        /* Plain (non-KaTeX) gold fallback */
+        .ms-result-chip-val--plain-gold { color: #92400e; }
         .ms-result-chip--gold .ms-result-chip-val { color: #92400e; }
         .ms-result-eq-sign { font-family: 'Lora', serif; font-size: 26px; color: #c8c3b8; }
         .ms-result-tag { font-size: 10px; color: #9b9480; letter-spacing: 0.06em; }
