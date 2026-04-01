@@ -23,12 +23,11 @@ const TIPS = [
   { icon: "✍️", text: "Write clearly with enough spacing between symbols" },
   { icon: "➗", text: "Draw a horizontal line for fractions" },
   { icon: "√", text: "Sketch the radical symbol fully for square roots" },
-  { icon: "⌨️", text: "Use Ctrl+Z or the Undo button to fix mistakes" },
+  { icon: "⌨️", text: "Use Ctrl+Z / Ctrl+Y to undo and redo" },
   { icon: "🔢", text: "Exponents go above and to the right of the base" },
   { icon: "🧹", text: "Use the eraser for small corrections" },
 ];
 
-// Declare katex on window for TypeScript
 declare global {
   interface Window {
     katex: {
@@ -41,27 +40,26 @@ declare global {
   }
 }
 
-// Convert backend expression strings to valid LaTeX
 function toLatex(raw: string): string {
   if (!raw) return raw;
   return raw
-    .replace(/\*\*/g, "^") // x**3 → x^3
-    .replace(/\*/g, " \\cdot ") // x*y  → x \cdot y
-    .replace(/sqrt\(([^)]+)\)/g, "\\sqrt{$1}") // sqrt(x) → \sqrt{x}
-    .replace(/\bpi\b/g, "\\pi") // pi → \pi
-    .replace(/\b(sin|cos|tan|cot|sec|csc)\(([^)]+)\)/g, "\\$1($2)") // trig
-    .replace(/\blog\(([^)]+)\)/g, "\\log($1)") // log(x)
-    .replace(/\bln\(([^)]+)\)/g, "\\ln($1)") // ln(x)
-    .replace(/\bexp\(([^)]+)\)/g, "\\exp($1)") // exp(x)
-    .replace(/\binfty\b/g, "\\infty") // infty → \infty
-    .replace(/\btheta\b/g, "\\theta") // theta → \theta
-    .replace(/\balpha\b/g, "\\alpha") // alpha → \alpha
-    .replace(/\bbeta\b/g, "\\beta") // beta → \beta
-    .replace(/\bgamma\b/g, "\\gamma") // gamma → \gamma
-    .replace(/\bdelta\b/g, "\\delta") // delta → \delta
-    .replace(/\blambda\b/g, "\\lambda") // lambda → \lambda
-    .replace(/\bmu\b/g, "\\mu") // mu → \mu
-    .replace(/\bsigma\b/g, "\\sigma"); // sigma → \sigma
+    .replace(/\*\*/g, "^")
+    .replace(/\*/g, " \\cdot ")
+    .replace(/sqrt\(([^)]+)\)/g, "\\sqrt{$1}")
+    .replace(/\bpi\b/g, "\\pi")
+    .replace(/\b(sin|cos|tan|cot|sec|csc)\(([^)]+)\)/g, "\\$1($2)")
+    .replace(/\blog\(([^)]+)\)/g, "\\log($1)")
+    .replace(/\bln\(([^)]+)\)/g, "\\ln($1)")
+    .replace(/\bexp\(([^)]+)\)/g, "\\exp($1)")
+    .replace(/\binfty\b/g, "\\infty")
+    .replace(/\btheta\b/g, "\\theta")
+    .replace(/\balpha\b/g, "\\alpha")
+    .replace(/\bbeta\b/g, "\\beta")
+    .replace(/\bgamma\b/g, "\\gamma")
+    .replace(/\bdelta\b/g, "\\delta")
+    .replace(/\blambda\b/g, "\\lambda")
+    .replace(/\bmu\b/g, "\\mu")
+    .replace(/\bsigma\b/g, "\\sigma");
 }
 
 function KaTeXSpan({
@@ -101,6 +99,7 @@ function KaTeXSpan({
 export default function CanvasArea() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const snapshotsRef = useRef<ImageData[]>([]);
+  const redoSnapshotsRef = useRef<ImageData[]>([]);
   const isDrawingRef = useRef(false);
 
   const [settings, setSettings] = useState<CanvasSettings>({
@@ -108,6 +107,7 @@ export default function CanvasArea() {
     brushColor: "#1a1a2e",
     isEraser: false,
   });
+  const [eraserSize, setEraserSize] = useState(16);
 
   const [status, setStatus] = useState<
     "idle" | "loading" | "success" | "error"
@@ -117,6 +117,9 @@ export default function CanvasArea() {
   const [hasDrawn, setHasDrawn] = useState(false);
   const [tipsOpen, setTipsOpen] = useState(false);
   const [katexLoaded, setKatexLoaded] = useState(false);
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(
+    null,
+  );
 
   const bounds = useRef({
     minX: Infinity,
@@ -152,14 +155,59 @@ export default function CanvasArea() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }, []);
 
+  const handleUndo = useCallback(() => {
+    if (snapshotsRef.current.length === 0) return;
+    const canvas = canvasRef.current!;
+    const ctx = canvas.getContext("2d")!;
+    redoSnapshotsRef.current.push(
+      ctx.getImageData(0, 0, canvas.width, canvas.height),
+    );
+    ctx.putImageData(snapshotsRef.current.pop()!, 0, 0);
+    recalculateBounds();
+  }, []);
+
+  const handleRedo = useCallback(() => {
+    if (redoSnapshotsRef.current.length === 0) return;
+    const canvas = canvasRef.current!;
+    const ctx = canvas.getContext("2d")!;
+    snapshotsRef.current.push(
+      ctx.getImageData(0, 0, canvas.width, canvas.height),
+    );
+    ctx.putImageData(redoSnapshotsRef.current.pop()!, 0, 0);
+    recalculateBounds();
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "z") handleUndo();
+      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        e.preventDefault();
+        handleUndo();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "y") {
+        e.preventDefault();
+        handleRedo();
+      }
       if (e.key === "Escape") setTipsOpen(false);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [handleUndo, handleRedo]);
+
+  // ── Unified coordinate helper for both mouse and pointer events ──
+  const getCoordsFromPointer = (
+    e: React.PointerEvent<HTMLCanvasElement> | PointerEvent,
+  ) => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+      ox: e.clientX - rect.left,
+      oy: e.clientY - rect.top,
+    };
+  };
 
   const getCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -168,6 +216,8 @@ export default function CanvasArea() {
     return {
       x: (e.clientX - rect.left) * scaleX,
       y: (e.clientY - rect.top) * scaleY,
+      ox: e.clientX - rect.left,
+      oy: e.clientY - rect.top,
     };
   };
 
@@ -178,6 +228,31 @@ export default function CanvasArea() {
     bounds.current.maxY = Math.max(bounds.current.maxY, y);
   };
 
+  // ── FIX: scan actual pixel data to recompute bounds after erasing ──
+  const recalculateBounds = useCallback(() => {
+    const canvas = canvasRef.current!;
+    const ctx = canvas.getContext("2d")!;
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        const i = (y * canvas.width + x) * 4;
+        // Any pixel that isn't near-white is considered drawn content
+        if (data[i] < 240 || data[i + 1] < 240 || data[i + 2] < 240) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    bounds.current = { minX, minY, maxX, maxY };
+  }, []);
+
   const saveSnapshot = () => {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
@@ -185,6 +260,30 @@ export default function CanvasArea() {
       ctx.getImageData(0, 0, canvas.width, canvas.height),
     );
     if (snapshotsRef.current.length > 40) snapshotsRef.current.shift();
+    redoSnapshotsRef.current = [];
+  };
+
+  // ── Apply drawing style to context (shared by mouse and pointer paths) ──
+  const applyDrawStyle = (
+    ctx: CanvasRenderingContext2D,
+    pressure: number = 1,
+    forceEraser: boolean = false,
+  ) => {
+    const isErase = forceEraser || settings.isEraser;
+    const baseSize = isErase ? eraserSize : settings.brushSize;
+    // For digitizer/stylus: modulate line width by pressure (clamped 0.2–1)
+    const effectivePressure = Math.max(0.2, Math.min(1, pressure));
+    ctx.lineWidth = baseSize * effectivePressure;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    if (isErase) {
+      // destination-out truly removes pixels regardless of canvas background
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.strokeStyle = "rgba(0,0,0,1)";
+    } else {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = settings.brushColor;
+    }
   };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -192,46 +291,159 @@ export default function CanvasArea() {
     isDrawingRef.current = true;
     setHasDrawn(true);
     const ctx = canvasRef.current!.getContext("2d")!;
-    const { x, y } = getCoords(e);
+    const { x, y, ox, oy } = getCoords(e);
     ctx.beginPath();
     ctx.moveTo(x, y);
     updateBounds(x, y);
+    setCursorPos({ x: ox, y: oy });
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { x, y, ox, oy } = getCoords(e);
+    setCursorPos({ x: ox, y: oy });
     if (!isDrawingRef.current) return;
     const ctx = canvasRef.current!.getContext("2d")!;
-    const { x, y } = getCoords(e);
-    ctx.lineWidth = settings.isEraser
-      ? settings.brushSize * 4
-      : settings.brushSize;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
     if (settings.isEraser) {
+      ctx.lineWidth = eraserSize;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.globalCompositeOperation = "destination-out";
       ctx.strokeStyle = "rgba(0,0,0,1)";
     } else {
+      ctx.lineWidth = settings.brushSize;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.globalCompositeOperation = "source-over";
       ctx.strokeStyle = settings.brushColor;
     }
     ctx.lineTo(x, y);
     ctx.stroke();
+    // Only expand bounds when drawing (not erasing)
+    // Shrinking is handled in endDrawing via recalculateBounds
     if (!settings.isEraser) updateBounds(x, y);
   };
 
+  // ── FIX: always recalculate bounds at end of every stroke ──
   const endDrawing = () => {
     isDrawingRef.current = false;
     const ctx = canvasRef.current!.getContext("2d")!;
     ctx.closePath();
+    // Always reset to source-over so future draws aren't affected
     ctx.globalCompositeOperation = "source-over";
+    // Restore white background where pixels were erased to transparent
+    // so the canvas stays white (not checkerboard) for the AI model
+    const canvas = canvasRef.current!;
+    const tmp = document.createElement("canvas");
+    tmp.width = canvas.width;
+    tmp.height = canvas.height;
+    const tctx = tmp.getContext("2d")!;
+    tctx.fillStyle = "#ffffff";
+    tctx.fillRect(0, 0, tmp.width, tmp.height);
+    tctx.drawImage(canvas, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(tmp, 0, 0);
+    setCursorPos(null);
+    // Recalculate from actual pixels — handles erasing shrinking the drawn area
+    recalculateBounds();
   };
 
-  const handleUndo = useCallback(() => {
-    if (snapshotsRef.current.length === 0) return;
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext("2d")!;
-    ctx.putImageData(snapshotsRef.current.pop()!, 0, 0);
-  }, []);
+  // ── Digitizer / stylus pointer event handlers ──
+  // These handle pen, touch, and mouse via the Pointer Events API.
+  // The "eraser" button on a stylus (pointerType === "pen", button === 5 or
+  // buttons === 32) automatically activates eraser behaviour.
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      // Only handle pen and touch; mouse is handled by the existing mouse events
+      if (e.pointerType === "mouse") return;
+
+      e.preventDefault();
+      canvasRef.current!.setPointerCapture(e.pointerId);
+
+      // Stylus eraser barrel button: button 5 (some drivers report buttons=32)
+      const isPenEraser =
+        e.pointerType === "pen" && (e.button === 5 || e.buttons === 32);
+
+      saveSnapshot();
+      isDrawingRef.current = true;
+      setHasDrawn(true);
+
+      const ctx = canvasRef.current!.getContext("2d")!;
+      const { x, y, ox, oy } = getCoordsFromPointer(e);
+
+      ctx.beginPath();
+      applyDrawStyle(ctx, e.pressure, isPenEraser);
+
+      ctx.moveTo(x, y);
+      updateBounds(x, y);
+      setCursorPos({ x: ox, y: oy });
+    },
+    [settings, eraserSize],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (e.pointerType === "mouse") return;
+      e.preventDefault();
+
+      const { x, y, ox, oy } = getCoordsFromPointer(e);
+      setCursorPos({ x: ox, y: oy });
+
+      if (!isDrawingRef.current) return;
+
+      const isPenEraser = e.pointerType === "pen" && e.buttons === 32;
+
+      const ctx = canvasRef.current!.getContext("2d")!;
+
+      // Use getCoalescedEvents when available for smoother stylus strokes
+      const events =
+        typeof e.nativeEvent.getCoalescedEvents === "function"
+          ? e.nativeEvent.getCoalescedEvents()
+          : [e.nativeEvent];
+
+      for (const coalesced of events) {
+        const cRect = canvasRef.current!.getBoundingClientRect();
+        const scaleX = canvasRef.current!.width / cRect.width;
+        const scaleY = canvasRef.current!.height / cRect.height;
+        const cx = (coalesced.clientX - cRect.left) * scaleX;
+        const cy = (coalesced.clientY - cRect.top) * scaleY;
+
+        applyDrawStyle(ctx, coalesced.pressure, isPenEraser);
+
+        ctx.lineTo(cx, cy);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+
+        if (!settings.isEraser && !isPenEraser) updateBounds(cx, cy);
+      }
+    },
+    [settings, eraserSize],
+  );
+
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (e.pointerType === "mouse") return;
+      e.preventDefault();
+      isDrawingRef.current = false;
+      const canvas = canvasRef.current!;
+      const ctx = canvas.getContext("2d")!;
+      ctx.closePath();
+      // Flatten transparent (erased) pixels back to white
+      const tmp = document.createElement("canvas");
+      tmp.width = canvas.width;
+      tmp.height = canvas.height;
+      const tctx = tmp.getContext("2d")!;
+      tctx.fillStyle = "#ffffff";
+      tctx.fillRect(0, 0, tmp.width, tmp.height);
+      tctx.drawImage(canvas, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(tmp, 0, 0);
+      setCursorPos(null);
+      recalculateBounds();
+    },
+    [recalculateBounds],
+  );
 
   const handleClear = useCallback(() => {
     const canvas = canvasRef.current;
@@ -247,17 +459,27 @@ export default function CanvasArea() {
       maxY: -Infinity,
     };
     snapshotsRef.current = [];
+    redoSnapshotsRef.current = [];
     setPrediction(null);
     setStatus("idle");
     setErrorMsg("");
     setHasDrawn(false);
   }, []);
 
+  // ── FIX: guard against fully-erased canvas returning a blank crop ──
   const exportCroppedImage = (): string | null => {
     const canvas = canvasRef.current!;
     const pad = 12;
     const { minX, minY, maxX, maxY } = bounds.current;
-    if (minX === Infinity) return null;
+    // Nothing drawn, or everything erased
+    if (
+      minX === Infinity ||
+      maxX === -Infinity ||
+      maxX <= minX ||
+      maxY <= minY
+    ) {
+      return null;
+    }
     const w = maxX - minX + pad * 2;
     const h = maxY - minY + pad * 2;
     const tmp = document.createElement("canvas");
@@ -286,10 +508,14 @@ export default function CanvasArea() {
       const res = await fetch(`${API_URL}/api/v1/predict/`, {
         method: "POST",
         body: form,
-      });
+        
+      }
+    );
       if (!res.ok)
         throw new Error(`Server error ${res.status}: ${await res.text()}`);
       const data: PredictResponse = await res.json();
+      console.log("raw prediction:", JSON.stringify(data));
+      console.log("API URL:", API_URL);
       setPrediction(data);
       setStatus("success");
     } catch (err) {
@@ -306,7 +532,7 @@ export default function CanvasArea() {
           <span className="ms-logo-sigma">&#x2211;</span>
           <div>
             <h1 className="ms-title">MathScript</h1>
-            <p className="ms-tagline">Handwritten Expression Recognition</p>
+            <p className="ms-tagline">Handwritten Expression Recognizer</p>
           </div>
         </div>
         <div className="ms-header-right">
@@ -373,6 +599,10 @@ export default function CanvasArea() {
               <span>Undo</span>
             </div>
             <div className="ms-shortcut-row">
+              <kbd>Ctrl Y</kbd>
+              <span>Redo</span>
+            </div>
+            <div className="ms-shortcut-row">
               <kbd>Esc</kbd>
               <span>Close tips</span>
             </div>
@@ -383,96 +613,229 @@ export default function CanvasArea() {
         <div className="ms-center">
           {/* Toolbar */}
           <div className="ms-toolbar">
-            <div className="ms-tool-group">
-              <label className="ms-label">Brush</label>
-              <input
-                type="range"
-                min={2}
-                max={16}
-                value={settings.brushSize}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, brushSize: +e.target.value }))
-                }
-                className="ms-slider"
-              />
-              <span className="ms-val">{settings.brushSize}px</span>
+            {/* ── Row 1: tool mode toggle + action buttons ── */}
+            <div className="ms-toolbar-row ms-toolbar-row--top">
+              {/* Mode pills */}
+              <div className="ms-mode-pills">
+                <button
+                  className={
+                    "ms-pill" + (!settings.isEraser ? " ms-pill--active" : "")
+                  }
+                  onClick={() =>
+                    setSettings((s) => ({ ...s, isEraser: false }))
+                  }
+                  title="Brush mode"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M12 19l7-7 3 3-7 7-3-3z" />
+                    <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+                    <path d="M2 2l7.586 7.586" />
+                    <circle cx="11" cy="11" r="2" />
+                  </svg>
+                  Brush
+                </button>
+                <button
+                  className={
+                    "ms-pill" +
+                    (settings.isEraser ? " ms-pill--eraser-active" : "")
+                  }
+                  onClick={() =>
+                    setSettings((s) => ({ ...s, isEraser: !s.isEraser }))
+                  }
+                  title="Eraser mode"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M20 20H7L3 16l10-10 7 7-3.5 3.5" />
+                    <path d="M6.5 17.5l3-3" />
+                  </svg>
+                  Eraser
+                </button>
+              </div>
+
+              <div className="ms-toolbar-sep" />
+
+              {/* Action buttons */}
+              <div className="ms-action-group">
+                <button
+                  className="ms-tool-btn"
+                  onClick={handleUndo}
+                  title="Undo (Ctrl+Z)"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M3 7v6h6" />
+                    <path d="M3 13C5 7 11 3 17 5s8 8 5 13-9 7-14 4" />
+                  </svg>
+                  Undo
+                </button>
+                <button
+                  className="ms-tool-btn"
+                  onClick={handleRedo}
+                  title="Redo (Ctrl+Y)"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M21 7v6h-6" />
+                    <path d="M21 13C19 7 13 3 7 5S-1 13 2 18s9 7 14 4" />
+                  </svg>
+                  Redo
+                </button>
+                <button
+                  className="ms-tool-btn ms-tool-btn--danger"
+                  onClick={handleClear}
+                  title="Clear canvas"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14H6L5 6" />
+                    <path d="M10 11v6M14 11v6" />
+                    <path d="M9 6V4h6v2" />
+                  </svg>
+                  Clear
+                </button>
+              </div>
             </div>
-            <div className="ms-tool-group">
-              <label className="ms-label">Color</label>
-              <input
-                type="color"
-                value={settings.brushColor}
-                onChange={(e) =>
-                  setSettings((s) => ({
-                    ...s,
-                    brushColor: e.target.value,
-                    isEraser: false,
-                  }))
+
+            {/* ── Row 2: active tool controls ── */}
+            <div className="ms-toolbar-row ms-toolbar-row--controls">
+              {/* Brush controls */}
+              <div
+                className={
+                  "ms-tool-controls" +
+                  (!settings.isEraser ? " ms-tool-controls--visible" : "")
                 }
-                className="ms-color-pick"
-              />
+              >
+                <div className="ms-control-card ms-control-card--brush">
+                  <div className="ms-control-card-header">
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
+                      <path d="M12 19l7-7 3 3-7 7-3-3z" />
+                      <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+                    </svg>
+                    <span>Brush</span>
+                  </div>
+                  <div className="ms-control-card-body">
+                    <div className="ms-control-row">
+                      <span className="ms-ctrl-label">Size</span>
+                      <input
+                        type="range"
+                        min={2}
+                        max={20}
+                        value={settings.brushSize}
+                        onChange={(e) =>
+                          setSettings((s) => ({
+                            ...s,
+                            brushSize: +e.target.value,
+                          }))
+                        }
+                        className="ms-slider"
+                      />
+                      <span className="ms-ctrl-val">
+                        {settings.brushSize}px
+                      </span>
+                    </div>
+                    <div className="ms-control-row">
+                      <span className="ms-ctrl-label">Color</span>
+                      <div className="ms-color-wrap">
+                        <input
+                          type="color"
+                          value={settings.brushColor}
+                          onChange={(e) =>
+                            setSettings((s) => ({
+                              ...s,
+                              brushColor: e.target.value,
+                              isEraser: false,
+                            }))
+                          }
+                          className="ms-color-pick"
+                        />
+                        <span className="ms-color-hex">
+                          {settings.brushColor}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Eraser controls */}
+              <div
+                className={
+                  "ms-tool-controls" +
+                  (settings.isEraser ? " ms-tool-controls--visible" : "")
+                }
+              >
+                <div className="ms-control-card ms-control-card--eraser">
+                  <div className="ms-control-card-header">
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
+                      <path d="M20 20H7L3 16l10-10 7 7-3.5 3.5" />
+                      <path d="M6.5 17.5l3-3" />
+                    </svg>
+                    <span>Eraser</span>
+                  </div>
+                  <div className="ms-control-card-body">
+                    <div className="ms-control-row">
+                      <span className="ms-ctrl-label">Size</span>
+                      <input
+                        type="range"
+                        min={4}
+                        max={60}
+                        value={eraserSize}
+                        onChange={(e) => setEraserSize(+e.target.value)}
+                        className="ms-slider ms-slider--eraser"
+                      />
+                      <span className="ms-ctrl-val">{eraserSize}px</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <button
-              className={
-                "ms-tool-btn" +
-                (settings.isEraser ? " ms-tool-btn--active" : "")
-              }
-              onClick={() =>
-                setSettings((s) => ({ ...s, isEraser: !s.isEraser }))
-              }
-              title="Toggle eraser"
-            >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M20 20H7L3 16l10-10 7 7-3.5 3.5" />
-                <path d="M6.5 17.5l3-3" />
-              </svg>
-              Eraser
-            </button>
-            <button
-              className="ms-tool-btn"
-              onClick={handleUndo}
-              title="Undo (Ctrl+Z)"
-            >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M3 7v6h6" />
-                <path d="M3 13C5 7 11 3 17 5s8 8 5 13-9 7-14 4" />
-              </svg>
-              Undo
-            </button>
-            <button
-              className="ms-tool-btn ms-tool-btn--danger"
-              onClick={handleClear}
-              title="Clear canvas"
-            >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6l-1 14H6L5 6" />
-                <path d="M10 11v6M14 11v6" />
-                <path d="M9 6V4h6v2" />
-              </svg>
-              Clear
-            </button>
           </div>
 
           {/* Canvas */}
@@ -482,12 +845,37 @@ export default function CanvasArea() {
               width={750}
               height={460}
               className="ms-canvas"
-              style={{ cursor: settings.isEraser ? "cell" : "crosshair" }}
+              style={{ cursor: settings.isEraser ? "none" : "crosshair" }}
+              // ── Mouse events (unchanged) ──
               onMouseDown={startDrawing}
               onMouseUp={endDrawing}
               onMouseMove={draw}
               onMouseLeave={endDrawing}
+              // ── Pointer events for digitizer / stylus / touch ──
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
+              // Prevent browser default touch/pan so the canvas draws smoothly
+              style={{
+                cursor: settings.isEraser ? "none" : "crosshair",
+                touchAction: "none",
+              }}
             />
+            {/* Eraser cursor circle overlay */}
+            {settings.isEraser && cursorPos && (
+              <div
+                className="ms-eraser-cursor"
+                style={{
+                  left: cursorPos.x,
+                  top: cursorPos.y,
+                  width: eraserSize,
+                  height: eraserSize,
+                  background: "rgba(255,255,255,0.85)",
+                  boxShadow: `0 0 0 1.5px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.4)`,
+                }}
+              />
+            )}
             {!hasDrawn && (
               <div className="ms-placeholder">
                 <span className="ms-placeholder-eq">&#x222B; f(x) dx</span>
@@ -531,7 +919,6 @@ export default function CanvasArea() {
           {/* Result */}
           {status === "success" && prediction && (
             <div className="ms-result">
-              {/* Expression chip */}
               <div className="ms-result-chip ms-result-chip--blue">
                 <span className="ms-result-chip-label">Expression</span>
                 {katexLoaded ? (
@@ -546,7 +933,6 @@ export default function CanvasArea() {
                 )}
               </div>
 
-              {/* Result chip */}
               {prediction.result !== null && (
                 <>
                   <span className="ms-result-eq-sign">=</span>
@@ -695,16 +1081,52 @@ export default function CanvasArea() {
 
         /* Toolbar */
         .ms-toolbar {
-          background: #fff; border: 1.5px solid #e5e2d8; border-radius: 14px;
-          padding: 10px 14px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+          background: #fff; border: 1.5px solid #e5e2d8; border-radius: 16px;
+          padding: 12px 16px; display: flex; flex-direction: column; gap: 0;
           box-shadow: 0 1px 6px rgba(26,26,46,0.04);
         }
-        .ms-tool-group { display: flex; align-items: center; gap: 8px; }
-        .ms-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: #9b9480; }
-        .ms-slider { -webkit-appearance: none; height: 3px; width: 80px; background: #e5e2d8; border-radius: 99px; outline: none; cursor: pointer; }
-        .ms-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #1a1a2e; cursor: pointer; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
-        .ms-val { font-size: 11px; color: #4a4438; min-width: 28px; }
-        .ms-color-pick { width: 28px; height: 28px; border: 1.5px solid #d8d3c8; border-radius: 8px; cursor: pointer; padding: 2px; background: none; }
+
+        /* Row 1 */
+        .ms-toolbar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .ms-toolbar-row--top { gap: 8px; }
+        .ms-toolbar-row--controls {
+          overflow: hidden;
+          max-height: 0;
+          padding-top: 0;
+          transition: max-height 0.25s ease, padding-top 0.25s ease;
+        }
+        .ms-toolbar-row--controls:has(.ms-tool-controls--visible) {
+          max-height: 120px;
+          padding-top: 12px;
+        }
+
+        /* Mode pills */
+        .ms-mode-pills {
+          display: flex; background: #f7f6f2; border: 1.5px solid #e5e2d8;
+          border-radius: 10px; padding: 3px; gap: 2px;
+        }
+        .ms-pill {
+          display: flex; align-items: center; gap: 5px;
+          font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.04em;
+          color: #7a7060; background: transparent; border: none; border-radius: 7px;
+          padding: 5px 12px; cursor: pointer; transition: all 0.15s; white-space: nowrap;
+        }
+        .ms-pill:hover { color: #1a1a2e; background: #ede9e0; }
+        .ms-pill--active {
+          background: #1a1a2e; color: #fff;
+          box-shadow: 0 1px 4px rgba(26,26,46,0.18);
+        }
+        .ms-pill--active svg { stroke: #f5c518; }
+        .ms-pill--eraser-active {
+          background: #277270; color: #fff;
+          box-shadow: 0 1px 4px rgba(220,38,38,0.25);
+        }
+        .ms-pill--eraser-active svg { stroke: #fff; }
+
+        .ms-toolbar-sep { flex: 1; }
+
+        /* Action buttons */
+        .ms-action-group { display: flex; align-items: center; gap: 6px; }
         .ms-tool-btn {
           display: flex; align-items: center; gap: 5px;
           font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.04em;
@@ -712,9 +1134,59 @@ export default function CanvasArea() {
           padding: 6px 12px; cursor: pointer; transition: all 0.15s; white-space: nowrap;
         }
         .ms-tool-btn:hover { background: #f0ede6; border-color: #ccc7ba; }
-        .ms-tool-btn--active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
-        .ms-tool-btn--active svg { stroke: #f5c518; }
         .ms-tool-btn--danger:hover { background: #fef2f2; border-color: #fca5a5; color: #dc2626; }
+
+        /* Row 2 — tool control cards */
+        .ms-tool-controls { display: none; }
+        .ms-tool-controls--visible { display: flex; width: 100%; }
+
+        .ms-control-card {
+          display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+          background: #f7f6f2; border: 1.5px solid #e5e2d8; border-radius: 12px;
+          padding: 10px 16px; width: 100%; gap: 14px;
+          animation: ms-fade-in 0.18s ease;
+        }
+        .ms-control-card--eraser {
+          background: #fff5f5; border-color: #fecaca;
+        }
+        .ms-control-card-header {
+          display: flex; align-items: center; gap: 5px;
+          font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+          color: #9b9480; font-weight: 600; white-space: nowrap; flex-shrink: 0;
+        }
+        .ms-control-card--eraser .ms-control-card-header { color: #dc2626; }
+        .ms-control-card--eraser .ms-control-card-header svg { stroke: #dc2626; }
+        .ms-control-card-body { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; flex: 1; }
+        .ms-control-row { display: flex; align-items: center; gap: 8px; }
+        .ms-ctrl-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: #b8b0a0; white-space: nowrap; }
+        .ms-ctrl-val { font-size: 11px; color: #4a4438; min-width: 32px; text-align: right; }
+
+        /* Sliders */
+        .ms-slider {
+          -webkit-appearance: none; height: 3px; width: 100px;
+          background: #d8d3c8; border-radius: 99px; outline: none; cursor: pointer;
+        }
+        .ms-slider::-webkit-slider-thumb {
+          -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+          background: #1a1a2e; cursor: pointer; border: 2px solid #fff;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+        }
+        .ms-slider--eraser { background: #fecaca; }
+        .ms-slider--eraser::-webkit-slider-thumb { background: #dc2626; }
+
+        /* Color picker */
+        .ms-color-wrap { display: flex; align-items: center; gap: 7px; }
+        .ms-color-pick {
+          width: 28px; height: 28px; border: 1.5px solid #d8d3c8;
+          border-radius: 8px; cursor: pointer; padding: 2px; background: none;
+          flex-shrink: 0;
+        }
+        .ms-color-pick--eraser { border-color: #fca5a5; }
+        .ms-color-hex { font-size: 10px; color: #9b9480; letter-spacing: 0.06em; font-family: 'IBM Plex Mono', monospace; }
+
+        .ms-tool-group { display: flex; align-items: center; gap: 8px; }
+        .ms-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: #9b9480; }
+        .ms-val { font-size: 11px; color: #4a4438; min-width: 28px; }
 
         /* Canvas */
         .ms-canvas-wrap {
@@ -724,6 +1196,16 @@ export default function CanvasArea() {
           background: #fff;
         }
         .ms-canvas { display: block; width: 100%; height: auto; touch-action: none; }
+
+        /* Eraser cursor circle */
+        .ms-eraser-cursor {
+          position: absolute;
+          border-radius: 50%;
+          pointer-events: none;
+          transform: translate(-50%, -50%);
+          transition: width 0.08s ease, height 0.08s ease;
+          will-change: transform;
+        }
         .ms-placeholder {
           position: absolute; inset: 0; display: flex; flex-direction: column;
           align-items: center; justify-content: center;
@@ -762,13 +1244,10 @@ export default function CanvasArea() {
         .ms-result-chip--gold { background: #fffbeb; border: 1.5px solid #fcd34d; }
         .ms-result-chip-label { font-size: 8px; text-transform: uppercase; letter-spacing: 0.16em; color: #9b9480; }
         .ms-result-chip-val { font-family: 'Lora', serif; font-size: 22px; color: #1a1a2e; line-height: 1.2; word-break: break-all; }
-        /* KaTeX rendered span — let KaTeX control font, just set size/color */
         .ms-result-chip-val--katex { font-size: 20px; color: #1a1a2e; line-height: 1.4; }
         .ms-result-chip-val--katex .katex { font-size: 1em; }
-        /* Gold variant for result chip KaTeX */
         .ms-result-chip-val--gold { color: #92400e !important; }
         .ms-result-chip-val--gold .katex { color: #92400e; }
-        /* Plain (non-KaTeX) gold fallback */
         .ms-result-chip-val--plain-gold { color: #92400e; }
         .ms-result-chip--gold .ms-result-chip-val { color: #92400e; }
         .ms-result-eq-sign { font-family: 'Lora', serif; font-size: 26px; color: #c8c3b8; }
@@ -778,7 +1257,10 @@ export default function CanvasArea() {
         /* Error */
         .ms-error { display: flex; align-items: center; gap: 8px; background: #fef2f2; border: 1.5px solid #fca5a5; border-radius: 12px; padding: 12px 16px; font-size: 12px; color: #dc2626; letter-spacing: 0.02em; }
 
-        /* ── Responsive: Mobile ≤ 680px ── */
+        .ms-eraser-options { display: none; }
+        .ms-eraser-divider { display: none; }
+        .ms-size-btn { display: none; }
+
         @media (max-width: 680px) {
           .ms-root { padding: 14px 12px 48px; gap: 16px; }
           .ms-tagline { display: none; }
@@ -786,7 +1268,6 @@ export default function CanvasArea() {
           .ms-tips-toggle { display: flex; }
           .ms-workspace { flex-direction: column; }
 
-          /* Tips become fixed right drawer */
           .ms-tips {
             position: fixed !important;
             top: 0; right: 0; bottom: 0;
@@ -803,18 +1284,21 @@ export default function CanvasArea() {
           .ms-tips-close { display: flex; }
           .ms-tips-backdrop { display: block; }
 
-          .ms-toolbar { gap: 8px; padding: 8px 10px; }
-          .ms-slider { width: 55px; }
-          .ms-tool-btn { padding: 6px 8px; font-size: 10px; gap: 4px; }
-          .ms-label { display: none; }
-          .ms-val { min-width: 22px; font-size: 10px; }
+          .ms-toolbar { padding: 10px 12px; }
+          .ms-pill { padding: 5px 9px; font-size: 10px; }
+          .ms-tool-btn { padding: 5px 8px; font-size: 10px; gap: 4px; }
+          .ms-slider { width: 70px; }
+          .ms-ctrl-label { display: none; }
+          .ms-ctrl-val { min-width: 26px; font-size: 10px; }
+          .ms-color-hex { display: none; }
+          .ms-control-card { padding: 8px 12px; gap: 10px; }
+          .ms-toolbar-row--controls:has(.ms-tool-controls--visible) { max-height: 160px; }
           .ms-submit-row { justify-content: stretch; }
           .ms-submit-btn { width: 100%; justify-content: center; }
           .ms-placeholder-eq { font-size: 24px; }
           .ms-placeholder-hint { font-size: 9px; }
         }
 
-        /* Tablet 681–900px */
         @media (min-width: 681px) and (max-width: 900px) {
           .ms-tips { width: 168px; }
           .ms-tips-toggle { display: none !important; }
